@@ -1,9 +1,6 @@
 all:
   hosts:
     target_machine:
-      ansible_host: 47.76.230.115
-      ansible_user: root
-      ansible_ssh_pass: Password123
 
   vars:
     namespace: getting-started-app
