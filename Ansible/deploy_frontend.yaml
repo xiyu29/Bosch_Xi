@@ -1,0 +1,138 @@
+---
+- name: Deploy Docker Getting Started app on K8s
+  hosts: target_machine
+  become: true
+  tasks:
+
+    - name: Check if kubernetes library is installed
+      ansible.builtin.shell: "python3 -c 'import kubernetes'"
+      register: kubernetes_check
+      ignore_errors: true
+
+    - name: Install kubernetes Python library with pip3 if not installed
+      ansible.builtin.command: "pip3 install kubernetes"
+      when: kubernetes_check.failed
+
+    - name: Create namespace
+      kubernetes.core.k8s:
+        kubeconfig: ~/.kube/config
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ namespace }}"
+
+    - name: Create deployment for Docker Getting Started app
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_label }}"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_label }}"
+          spec:
+            replicas: "{{ replicas }}"
+            selector:
+              matchLabels:
+                app: "{{ app_label }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ app_label }}"
+              spec:
+                containers:
+                - name: frontend-container
+                  image: registry.cn-beijing.aliyuncs.com/docker_study_example/docker-getting-started:latest
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: MYSQL_HOST
+                      value: "mysql-service"
+                    - name: MYSQL_PORT
+                      value: "3306"
+                    - name: MYSQL_DB
+                      value: "appdata"
+                    - name: MYSQL_USER
+                      value: "user"
+                    - name: MYSQL_PASSWORD
+                      value: "userpwd"
+                  ports:
+                  - containerPort: 3000
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "250m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "500m"
+
+    - name: Expose deployment with a service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ app_label }}-service"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_label }}"
+          spec:
+            type: ClusterIP
+            selector:
+              app: "{{ app_label }}"
+            ports:
+            - protocol: TCP
+              port: 8080
+              targetPort: 3000
+
+    - name: Create ingress resource for external access
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: "{{ app_label }}-ingress"
+            namespace: "{{ namespace }}"
+            annotations:
+              nginx.ingress.kubernetes.io/rewrite-target: /
+          spec:
+            rules:
+            - host: "{{ ansible_host }}.nip.io"
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: "{{ app_label }}-service"
+                      port:
+                        number: 8080
+
+    - name: Create Flannel DaemonSet
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: kube-flannel-ds
+            namespace: kube-system
+            labels:
+              app: flannel
+          spec:
+            selector:
+              matchLabels:
+                app: flannel
+            template:
+              metadata:
+                labels:
+                  app: flannel
+              spec:
+                containers:
+                - name: kube-flannel
+                  image: registry.cn-beijing.aliyuncs.com/docker_study_example/flannel:latest

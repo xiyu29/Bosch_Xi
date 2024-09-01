@@ -1,0 +1,18 @@
+all:
+  hosts:
+    target_machine:
+      ansible_host: 47.76.230.115
+      ansible_user: root
+      ansible_ssh_pass: Password123
+
+  vars:
+    namespace: getting-started-app
+    replicas: 1
+    app_label: frontend-app
+    mirror_name: getting-started-yx
+    mysql_root_password: "root_password"
+    mysql_database: "my_database"
+    mysql_user: "my_user"
+    mysql_password: "my_password"
+    mysql_label: "mysql"
+    label: "label"
