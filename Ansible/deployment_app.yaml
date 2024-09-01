@@ -1,0 +1,362 @@
+---
+- name: Install K3s using China mirror
+  hosts: all
+  become: yes
+  tasks:
+    - name: Download and install K3s using Rancher China mirror
+      shell: |
+        curl -sfL https://rancher-mirror.rancher.cn/k3s/k3s-install.sh | INSTALL_K3S_MIRROR=cn sh -
+      args:
+        executable: /bin/bash
+
+    - name: Ensure K3s service is running
+      systemd:
+        name: k3s
+        state: started
+        enabled: yes
+
+    - name: Verify K3s installation
+      command: kubectl get nodes
+      register: k3s_nodes
+      changed_when: false
+
+    - name: Show K3s nodes
+      debug:
+        msg: "{{ k3s_nodes.stdout }}"
+  
+- name: Install Docker
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Check if Docker is installed
+      command: docker --version
+      register: docker_version
+      ignore_errors: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+        state: present
+      when: docker_version.failed
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg
+        state: present
+      when: docker_version.failed
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://mirrors.aliyun.com/docker-ce/linux/ubuntu focal stable
+        state: present
+      when: docker_version.failed
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+      when: docker_version.failed
+
+    - name: Start and enable Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      when: docker_version.failed
+
+    - name: Configure Docker to use Aliyun registry mirror
+      lineinfile:
+        path: /etc/docker/daemon.json
+        line: '{"registry-mirrors": ["https://docker.mirrors.ustc.edu.cn"]}'
+        create: yes
+      notify:
+        - Restart Docker
+      when: docker_version.failed
+
+  handlers:
+    - name: Restart Docker
+      service:
+        name: docker
+        state: restarted
+      when: docker_version.failed
+
+- name: Set up kubeconfig for K3s cluster
+  hosts: target_machine
+  become: true
+  tasks:
+
+    - name: Ensure .kube directory exists
+      ansible.builtin.file:
+        path: /home/{{ ansible_user }}/.kube
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Copy file from source to destination
+      ansible.builtin.command:
+        cmd: cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+
+    - name: Verify kubectl can connect to the cluster
+      ansible.builtin.shell: "kubectl get nodes"
+      register: kubectl_output
+      failed_when: "'No resources found' in kubectl_output.stdout"
+
+    - name: Debug output from kubectl
+      ansible.builtin.debug:
+        var: kubectl_output.stdout
+
+- name: Create Persistent Volume and Persistent Volume Claim for MySQL
+  hosts: target_machine
+  tasks:
+    - name: Create Persistent Volume
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+        definition:
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: mysql-pv
+            namespace: "{{ namespace }}"
+          spec:
+            capacity:
+              storage: 1Gi
+            accessModes:
+              - ReadWriteOnce
+            hostPath:
+              path: /data/mysql_data
+            storageClassName: manual
+
+    - name: Create Persistent Volume Claim
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: mysql-pvc
+            namespace: "{{ namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 1Gi
+            storageClassName: manual
+
+- name: Deploy MySQL with Persistent Volume Claim
+  hosts: target_machine
+  tasks:
+    - name: Create MySQL Deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: mysql-deployment
+            namespace: "{{ namespace }}"
+          spec:
+            replicas: "{{ replicas }}"
+            selector:
+              matchLabels:
+                app: "{{ mysql_label }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ mysql_label }}"
+              spec:
+                containers:
+                - name: mysql
+                  image: mysql:latest
+                  env:
+                    - name: ALLOW_EMPTY_PASSWORD
+                      value: "yes"
+                    - name: MYSQL_ROOT_PASSWORD
+                      value: "rootpwd"
+                    - name: MYSQL_DATABASE
+                      value: "appdata"
+                    - name: MYSQL_USER
+                      value: "user"
+                    - name: MYSQL_PASSWORD
+                      value: "userpwd"
+                  ports:
+                  - containerPort: 3306
+                  volumeMounts:
+                  - name: mysql-storage
+                    mountPath: /var/lib/mysql
+                volumes:
+                - name: mysql-storage
+                  persistentVolumeClaim:
+                    claimName: mysql-pvc
+
+    - name: Create MySQL Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: mysql-service
+            namespace: "{{ namespace }}"
+          spec:
+            selector:
+              app: "{{ mysql_label }}"
+            ports:
+            - protocol: TCP
+              port: 3306
+              targetPort: 3306
+            type: ClusterIP
+
+- name: Deploy Docker Getting Started app on K8s
+  hosts: target_machine
+  become: true
+  tasks:
+
+    - name: Check if kubernetes library is installed
+      ansible.builtin.shell: "python3 -c 'import kubernetes'"
+      register: kubernetes_check
+      ignore_errors: true
+
+    - name: Install kubernetes Python library with pip3 if not installed
+      ansible.builtin.command: "pip3 install kubernetes"
+      when: kubernetes_check.failed
+
+    - name: Create namespace
+      kubernetes.core.k8s:
+        kubeconfig: ~/.kube/config
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ namespace }}"
+
+    - name: Create deployment for Docker Getting Started app
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_label }}"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_label }}"
+          spec:
+            replicas: "{{ replicas }}"
+            selector:
+              matchLabels:
+                app: "{{ app_label }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ app_label }}"
+              spec:
+                containers:
+                - name: frontend-container
+                  image: registry.cn-beijing.aliyuncs.com/docker_study_example/docker-getting-started:latest
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: MYSQL_HOST
+                      value: "mysql-service"
+                    - name: MYSQL_PORT
+                      value: "3306"
+                    - name: MYSQL_DB
+                      value: "appdata"
+                    - name: MYSQL_USER
+                      value: "user"
+                    - name: MYSQL_PASSWORD
+                      value: "userpwd"
+                  ports:
+                  - containerPort: 3000
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "250m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "500m"
+
+    - name: Expose deployment with a service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ app_label }}-service"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_label }}"
+          spec:
+            type: ClusterIP
+            selector:
+              app: "{{ app_label }}"
+            ports:
+            - protocol: TCP
+              port: 8080
+              targetPort: 3000
+
+    - name: Create ingress resource for external access
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: "{{ app_label }}-ingress"
+            namespace: "{{ namespace }}"
+            annotations:
+              nginx.ingress.kubernetes.io/rewrite-target: /
+          spec:
+            rules:
+            - host: "{{ ansible_host }}.nip.io"
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: "{{ app_label }}-service"
+                      port:
+                        number: 8080
+
+    - name: Create Flannel DaemonSet
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: kube-flannel-ds
+            namespace: kube-system
+            labels:
+              app: flannel
+          spec:
+            selector:
+              matchLabels:
+                app: flannel
+            template:
+              metadata:
+                labels:
+                  app: flannel
+              spec:
+                containers:
+                - name: kube-flannel
+                  image: registry.cn-beijing.aliyuncs.com/docker_study_example/flannel:latest
