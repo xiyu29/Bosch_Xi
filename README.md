@@ -6,18 +6,9 @@
 # Docker getting atarted app by Ansible
 In this part, I have created 2 documents to deploy a single-node k8s cluster on a remote ECS and then deploy a Docker getting started app on this cluster. 
 ## How it works?
-First of all, go to `inventory.yaml` and modify following champs
-`
-ansible_host: 47.76.230.115
-ansible_user: root
-ansible_ssh_pass: !vault |
-    $ANSIBLE_VAULT;1.1;AES256
-    31626439323662386262373237373632376537323365336337636436363962663265646435386132
-    3933613230386466386432376464343537353237656330300a666632333764376364643236393535
-    37623834353037636537643433303438313765396637303533323835663264623337383039363862
-    6363376334313233340a656232303538626132313265386165633830356363363233656164383363
-    3937
-`
-in using your own host ip address, user name and password.
+First of all, go to `inventory.yaml` and modify following champs `ansible_host`, `ansible_user` and `ansible_ssh_pass` in using your own host ip address, user name and password.  
+Then execute the following command ```ansible-playbook playbook.yml -i inventory.yaml --ask-vault-pass``` to start deploying the applicaiton.  
+As `inventory.yaml` is encrypted, you will be asked to enter the password to move forward.  
+The address of the site is declared in the block `Create ingress resource for external access` of `deployment_app.yaml`.
 # Ping each other by Terraform
 
