@@ -1,8 +1,8 @@
 # Table of contens
-- [Ansible - Getting atarted app by Docker](#Ansible - Getting started app by Docker)
-- [Terraform - Ping each other](#Terraform - Ping each other)
+- [Docker getting atarted app by Ansible](#Docker-getting-atarted-app-by-Ansible)
+- [Ping each other by Terraform](#Ping-each-other-by-Terraform)
 
-# Ansible - Getting atarted app by Docker
+# Docker getting atarted app by Ansible
 
-# Terraform - Ping each other
+# Ping each other by Terraform
 
