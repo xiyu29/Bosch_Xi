@@ -79,7 +79,7 @@
         enabled: yes
       when: docker_version.failed
 
-    - name: Configure Docker to use Aliyun registry mirror
+    - name: Configure Docker to use USTC registry mirror
       lineinfile:
         path: /etc/docker/daemon.json
         line: '{"registry-mirrors": ["https://docker.mirrors.ustc.edu.cn"]}'
@@ -99,7 +99,6 @@
   hosts: target_machine
   become: true
   tasks:
-
     - name: Ensure .kube directory exists
       ansible.builtin.file:
         path: /home/{{ ansible_user }}/.kube
