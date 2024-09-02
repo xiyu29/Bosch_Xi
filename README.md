@@ -9,7 +9,7 @@ In this part, 2 documents are created to deploy a single-node k8s cluster on a r
 ## How it works?
 First of all, go to `inventory.yaml` and modify following champs `ansible_host`, `ansible_user` and `ansible_ssh_pass` in using your own host ip address, user name and password.  
   
-Then execute the following command ```ansible-playbook deployment_app.yml -i inventory.yaml --ask-vault-pass``` to start deploying the applicaiton.  
+Then execute the following command ```ansible-playbook deployment_app.yaml -i inventory.yaml --ask-vault-pass``` to start deploying the applicaiton.  
   
 As `inventory.yaml` is encrypted, you will be asked to enter the password to move forward.  
   
