@@ -7,8 +7,13 @@
 In this part, I have created 2 documents to deploy a single-node k8s cluster on a remote ECS and then deploy a Docker getting started app on this cluster. 
 ## How it works?
 First of all, go to `inventory.yaml` and modify following champs `ansible_host`, `ansible_user` and `ansible_ssh_pass` in using your own host ip address, user name and password.  
+  
 Then execute the following command ```ansible-playbook playbook.yml -i inventory.yaml --ask-vault-pass``` to start deploying the applicaiton.  
+  
 As `inventory.yaml` is encrypted, you will be asked to enter the password to move forward.  
-The address of the site is declared in the block `Create ingress resource for external access` of `deployment_app.yaml`.
+  
+The address of the site is declared in the block `Create ingress resource for external access` of `deployment_app.yaml`.  
+  
+In this example, you can go to `http://47.76.230.115.nip.io/` to see a demostration. If it does not work, please contact the owner of this repository. 
 # Ping each other by Terraform
 
